@@ -1,0 +1,6 @@
+[submodule "bible_databases"]
+	path = bible_databases
+	url = https://github.com/scrollmapper/bible_databases.git
+[submodule "divinum-officium"]
+	path = divinum-officium
+	url = https://github.com/DivinumOfficium/divinum-officium.git

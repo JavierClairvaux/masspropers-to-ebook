@@ -1,8 +1,5 @@
-# Vendored data repos — cloned from upstream, not this project's code.
-# Ignored (not submoduled) since they're large, third-party, and each carries
-# its own .git dir that would otherwise show up as a confusing gitlink.
-/bible_databases/
-/divinum-officium/
+# bible_databases/ and divinum-officium/ are git submodules (see .gitmodules) —
+# tracked as pinned commit references, not ignored.
 
 # Generated output
 /output/
