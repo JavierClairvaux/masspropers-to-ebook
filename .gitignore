@@ -1,0 +1,28 @@
+# Vendored data repos — cloned from upstream, not this project's code.
+# Ignored (not submoduled) since they're large, third-party, and each carries
+# its own .git dir that would otherwise show up as a confusing gitlink.
+/bible_databases/
+/divinum-officium/
+
+# Generated output
+/output/
+/cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Secrets — never commit
+auth.token
+*.token
+
+# Editor/OS cruft
+.DS_Store
+*.swp
+
+# Leftover artifacts from setup
+*.zip
