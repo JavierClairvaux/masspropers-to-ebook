@@ -7,6 +7,23 @@ fetches the corresponding **Spanish Bible text** (Biblia Platense /
 Straubinger), and assembles a minimal **EPUB** suitable for the Xteink X3
 e-reader (CrossPoint firmware).
 
+Repo: https://github.com/JavierClairvaux/masspropers-to-ebook
+
+## Setup
+
+`divinum-officium/` and `bible_databases/` are git submodules, pinned to the
+exact commits this tool was verified against. Clone with:
+
+```bash
+git clone --recurse-submodules git@github.com:JavierClairvaux/masspropers-to-ebook.git
+```
+
+If you already cloned without `--recurse-submodules`:
+
+```bash
+git submodule update --init
+```
+
 ## Usage
 
 ```bash
