@@ -5,6 +5,9 @@
 /output/
 /cache/
 
+# Calibre-Web runtime state (db, sessions, credentials) — not source
+/calibre-web/config/
+
 # Python
 __pycache__/
 *.pyc
