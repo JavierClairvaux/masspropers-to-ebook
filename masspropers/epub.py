@@ -15,7 +15,7 @@ import zipfile
 from xml.sax.saxutils import escape
 
 from .bible import Bible, MissingVerseError
-from .parse import DayPropers
+from .parse import DayPropers, classify_season
 
 # Traditional Spanish names for the proper parts, in their liturgical order.
 # Unmapped section names fall back to the Latin name as-is.
@@ -108,6 +108,7 @@ def build_epub(
     """Write the EPUB for *day* to *out_path* and return the path."""
     title = f"{day.day_name} — {date.isoformat()}"
     book_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"mass-propers/{date.isoformat()}"))
+    season = classify_season(day.day_name, day.rank)
 
     chapters: list[tuple[str, str, str]] = []  # (file name, toc label, xhtml)
 
@@ -118,9 +119,10 @@ def build_epub(
         tp += f'<p class="meta">{escape(day.rank)}</p>\n'
     tp += f'<p class="meta">{date.isoformat()}</p>\n'
     tp += (
-        '<p class="meta">Sagrada Escritura de los Propios de la Misa<br/>'
+        '<p class="meta">Propios de la Misa<br/>'
         "(Misal Romano de 1962)<br/>"
-        "Texto: Biblia Platense (Mons. Straubinger)</p>\n"
+        "Lecturas: Biblia Platense (Mons. Straubinger)<br/>"
+        "Oraciones: Divinum Officium</p>\n"
     )
     tp += "</body>\n</html>\n"
     chapters.append(("title.xhtml", escape(title), tp))
@@ -128,13 +130,17 @@ def build_epub(
     for i, section in enumerate(day.sections, 1):
         disp = _section_display(section.name)
         fname = f"s{i:02d}.xhtml"
-        first_cit = section.citations[0].display
-        page_title = f"{disp}: {first_cit}"
+        if section.citations:
+            page_title = f"{disp}: {section.citations[0].display}"
+        else:
+            page_title = disp
         x = _XHTML_HEAD.format(title=escape(page_title))
         x += f"<h2>{escape(disp)}</h2>\n"
         for cit in section.citations:
             x += f"<h3>{escape(cit.display)}</h3>\n"
             x += _passage_html(bible, cit) + "\n"
+        if not section.citations and section.prayer_text:
+            x += f'<p class="passage">{escape(section.prayer_text)}</p>\n'
         x += "</body>\n</html>\n"
         chapters.append((fname, escape(page_title), x))
 
@@ -164,6 +170,8 @@ def build_epub(
     <dc:identifier id="bookid">urn:uuid:{book_id}</dc:identifier>
     <dc:creator opf:role="edt">mass-propers</dc:creator>
     <dc:date>{date.isoformat()}</dc:date>
+    <dc:subject>Español</dc:subject>
+    <dc:subject>{escape(season)}</dc:subject>
   </metadata>
   <manifest>
     {chr(10).join('    ' + m for m in manifest_items).strip()}

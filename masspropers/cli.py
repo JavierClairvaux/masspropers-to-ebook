@@ -8,9 +8,9 @@ import re
 import sys
 
 from .bible import Bible
-from .epub import build_epub
+from .epub import SECTION_ES, build_epub
 from .fetch import VERSION_1962, fetch_propers_html
-from .parse import parse_propers_html
+from .parse import parse_propers_html, parse_propers_prose
 
 
 def _parse_date(s: str) -> _dt.date:
@@ -65,6 +65,32 @@ def main(argv: list[str] | None = None) -> int:
           + (f" ({day.rank})" if day.rank else ""))
     for sec_name, cit in day.all_citations():
         print(f"  [{sec_name}] {cit.source}  ->  {cit.display}")
+
+    # Non-scriptural propers (Oratio/Secreta/Postcommunio — original prayers,
+    # not Scripture) have no citation to look up in SpaPlatense. For those
+    # only, pull DivinumOfficium's own Spanish prose from a second fetch.
+    prayer_sections = [s for s in day.sections if not s.citations]
+    if prayer_sections:
+        es_body = fetch_propers_html(
+            args.date, VERSION_1962, backend=args.source,
+            use_cache=not args.no_cache, lang="Espanol",
+        )
+        prose = parse_propers_prose(es_body)
+        for s in prayer_sections:
+            # The rendered Spanish page translates the section heading itself
+            # (Oratio -> Colecta, Postcommunio -> Poscomunión, ...), so look
+            # up by the same Latin->Spanish name used for display, not the
+            # Latin name directly. Fall back to the Latin name in case a
+            # section is untranslated (e.g. already identical, like Secreta).
+            es_name = SECTION_ES.get(s.name, s.name)
+            s.prayer_text = prose.get(es_name) or prose.get(s.name)
+            if not s.prayer_text:
+                print(f"WARNING: no prose found for [{s.name}] in the Spanish "
+                      f"DivinumOfficium page; section will be omitted.",
+                      file=sys.stderr)
+        day.sections = [
+            s for s in day.sections if s.citations or s.prayer_text
+        ]
 
     if not day.sections:
         print("No scripture citations found for this day; no EPUB generated.",

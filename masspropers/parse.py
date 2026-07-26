@@ -43,11 +43,26 @@ _TITLE_RE = re.compile(
 )
 _REDITALIC_RE = re.compile(r"<FONT COLOR=\"red\"><I>(.*?)</I></FONT>", re.S)
 
+# The page-navigation "Top / Next / Prev" links each block starts with —
+# boilerplate UI, not content. Strip before extracting prose or checking
+# whether a block has any real content.
+_NAV_RE = re.compile(r"<DIV ALIGN='right'>.*?</DIV>", re.S)
+
+# Fixed Ordinary-of-the-Mass parts (same text every day, not day-specific
+# Propers) — excluded even though they now have prose text like the real
+# Propers do, since they're not what this tool is for. Confirmed exact
+# DivinumOfficium section names from divinum-officium/.../Ordo/Prayers.txt.
+_ORDINARY_SECTIONS = {"Gloria", "Gloria1", "Credo"}
+
 
 @dataclass
 class Section:
     name: str                       # e.g. 'Introitus', 'Lectio'
     citations: list[Citation] = field(default_factory=list)
+    # Set only for non-scriptural propers (Oratio/Secreta/Postcommunio etc.)
+    # that have no Scripture citation to look up — DivinumOfficium's own
+    # Spanish prose is used verbatim instead. See parse_propers_prose().
+    prayer_text: str | None = None
 
 
 @dataclass
@@ -102,12 +117,74 @@ def parse_propers_html(body: str) -> DayPropers:
         if not tm:
             continue
         name = _clean(tm.group(1))
+        if name in _ORDINARY_SECTIONS:
+            continue
         section = Section(name=name)
         for cand in _REDITALIC_RE.findall(block):
             cand = _clean(cand)
             cit = _classify(cand)
             if cit is not None:
                 section.citations.append(cit)
-        if section.citations:
+        rest = _NAV_RE.sub("", _TITLE_RE.sub("", block, count=1))
+        if section.citations or _clean(rest):
             day.sections.append(section)
     return day
+
+
+def parse_propers_prose(body: str) -> dict[str, str]:
+    """Map section name -> plain prose text, for every proper part on the page.
+
+    No citation parsing/classification at all (deliberately) — this is meant
+    to run against DivinumOfficium's own Spanish-language rendering, whose
+    citation abbreviations aren't in BOOK_MAP and would otherwise risk an
+    UnknownBookError for sections we don't even need citations from. Callers
+    only use the prose for sections that came back with zero citations from
+    the Latin-language parse (Oratio/Secreta/Postcommunio) — the actual
+    Scripture text still comes from SpaPlatense via the Latin-parsed
+    citations, never from here.
+    """
+    prose: dict[str, str] = {}
+    blocks = re.split(r"<TR><TD[^>]*>", body)
+    for block in blocks[1:]:
+        tm = _TITLE_RE.search(block)
+        if not tm:
+            continue
+        name = _clean(tm.group(1))
+        rest = _NAV_RE.sub("", _TITLE_RE.sub("", block, count=1))
+        text = re.sub(r"\s+", " ", _clean(rest)).strip()
+        if text:
+            prose[name] = text
+    return prose
+
+
+# Ordered (pattern, season) checks against day_name/rank text. Order matters:
+# e.g. "post Pentecosten" must be checked before a bare "Pentecost" match
+# (Pentecost Sunday itself is Paschaltide, but every following Sunday's name
+# also contains "Pentecosten" as part of "post Pentecosten"/"post Octavam
+# Pentecostes"); likewise "post Epiphaniam" (its own season) before a bare
+# "Epiphania" match (the feast day itself, within Christmastide). This is a
+# heuristic over DivinumOfficium's rendered day name, not a lookup into its
+# own calendar engine — treat edge cases (unusual octave/vigil names) as
+# discoverable-by-testing rather than guaranteed correct.
+_SEASON_PATTERNS: list[tuple[str, str]] = [
+    (r"post\s+(octavam\s+)?pentecost", "Tempus post Pentecosten"),
+    (r"post\s+epiphaniam", "Tempus post Epiphaniam"),
+    (r"quadragesim", "Quadragesima"),
+    (r"in\s+palmis|in\s+cena\s+domini|in\s+parasceve|sabbato\s+sancto", "Quadragesima"),
+    (r"adventus|adventu\b", "Adventus"),
+    (r"pascha|resurrectionis|ascensionis|pentecost", "Tempus Paschale"),
+    (r"nativitat|epiphania", "Tempus Nativitatis"),
+]
+
+
+def classify_season(day_name: str, rank: str = "") -> str:
+    """Best-effort Latin liturgical-season label from the resolved day name.
+
+    Falls back to 'Sanctorale' for fixed feast/saints' days that don't fall
+    within a named Tempora season (the common case for Sancti-calendar days).
+    """
+    haystack = f"{day_name} {rank}".lower()
+    for pattern, season in _SEASON_PATTERNS:
+        if re.search(pattern, haystack):
+            return season
+    return "Sanctorale"

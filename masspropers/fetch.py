@@ -40,7 +40,7 @@ POLITE_DELAY = 2.0  # seconds between remote requests
 _last_remote_fetch = 0.0
 
 
-def _query_string(date: _dt.date, version: str) -> str:
+def _query_string(date: _dt.date, version: str, lang: str = "Latin") -> str:
     """Build the missa.pl query string for a propers-only, single-column page.
 
     Empirically determined parameter set (see README):
@@ -50,12 +50,18 @@ def _query_string(date: _dt.date, version: str) -> str:
       * Propers=1 substitutes the propers-only Ordo (Ordo/Propers.txt), so the
         output contains just Introitus..Postcommunio instead of the whole
         Order of Mass.
+
+    *lang* defaults to "Latin" (used for citation extraction — the ``!``
+    citation grammar is identical across language files). Pass "Espanol" to
+    get DivinumOfficium's own Spanish prose instead, used for the
+    non-scriptural propers (Oratio/Secreta/Postcommunio) that have no
+    Scripture citation to look up in SpaPlatense.
     """
     params = {
         "date": date.strftime("%m-%d-%Y"),
         "version": version,
-        "lang1": "Latin",
-        "lang2": "Latin",
+        "lang1": lang,
+        "lang2": lang,
         "command": "pray",
         "content": "1",
         "Propers": "1",
@@ -63,16 +69,17 @@ def _query_string(date: _dt.date, version: str) -> str:
     return urllib.parse.urlencode(params)
 
 
-def _cache_path(date: _dt.date, version: str, backend: str) -> str:
+def _cache_path(date: _dt.date, version: str, backend: str, lang: str = "Latin") -> str:
     slug = version.replace(" ", "_").replace("-", "").replace("__", "_")
+    lang_suffix = "" if lang == "Latin" else f"_{lang}"
     return os.path.join(
-        CACHE_DIR, f"{date.isoformat()}_{slug}_{backend}.html"
+        CACHE_DIR, f"{date.isoformat()}_{slug}_{backend}{lang_suffix}.html"
     )
 
 
-def _fetch_local(date: _dt.date, version: str) -> str:
+def _fetch_local(date: _dt.date, version: str, lang: str = "Latin") -> str:
     env = dict(os.environ)
-    env["QUERY_STRING"] = _query_string(date, version)
+    env["QUERY_STRING"] = _query_string(date, version, lang)
     env["REQUEST_METHOD"] = "GET"
     # missa.pl relies on FindBin, so run it from its own directory.
     proc = subprocess.run(
@@ -95,12 +102,12 @@ def _fetch_local(date: _dt.date, version: str) -> str:
     return body
 
 
-def _fetch_remote(date: _dt.date, version: str) -> str:
+def _fetch_remote(date: _dt.date, version: str, lang: str = "Latin") -> str:
     global _last_remote_fetch
     wait = POLITE_DELAY - (time.monotonic() - _last_remote_fetch)
     if wait > 0:
         time.sleep(wait)
-    url = f"{REMOTE_BASE}?{_query_string(date, version)}"
+    url = f"{REMOTE_BASE}?{_query_string(date, version, lang)}"
     req = urllib.request.Request(
         url, headers={"User-Agent": "mass-propers-epub/1.0 (polite; cached)"}
     )
@@ -120,16 +127,17 @@ def fetch_propers_html(
     version: str = VERSION_1962,
     backend: str = "local",
     use_cache: bool = True,
+    lang: str = "Latin",
 ) -> str:
     """Return the propers-only HTML page for *date*, using the cache if possible."""
-    path = _cache_path(date, version, backend)
+    path = _cache_path(date, version, backend, lang)
     if use_cache and os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             return f.read()
     if backend == "local":
-        body = _fetch_local(date, version)
+        body = _fetch_local(date, version, lang)
     elif backend == "remote":
-        body = _fetch_remote(date, version)
+        body = _fetch_remote(date, version, lang)
     else:
         raise ValueError(f"unknown backend {backend!r}")
     os.makedirs(CACHE_DIR, exist_ok=True)
