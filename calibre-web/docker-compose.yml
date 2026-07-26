@@ -1,15 +1,17 @@
 services:
-  calibre-web:
-    image: lscr.io/linuxserver/calibre-web:latest
-    container_name: calibre-web
+  calibre-web-automated:
+    image: crocodilestick/calibre-web-automated:latest
+    container_name: calibre-web-automated
     environment:
       - PUID=1000
       - PGID=1000
       - TZ=Etc/UTC
-      - DOCKER_MODS=linuxserver/mods:universal-calibre # adds calibre's ebook-convert, optional
+      - NETWORK_SHARE_MODE=false
+      - CWA_PORT_OVERRIDE=8083
     volumes:
       - ./config:/config
-      - ../output:/books # masspropers-generated EPUBs, served read-only into the library
+      - ./ingest:/cwa-book-ingest # drop new EPUBs here; auto-imported then deleted
+      - ./library:/calibre-library # the actual Calibre library (metadata.db lives here)
     ports:
       - 8083:8083
     restart: unless-stopped
