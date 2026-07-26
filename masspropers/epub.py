@@ -35,15 +35,81 @@ SECTION_ES = {
     "Postcommunio": "Poscomunión",
 }
 
+# Traditional English names for the same parts. Double duty, exactly like
+# SECTION_ES: display names in the book, *and* the key cli.py looks the
+# non-scriptural prose up by in DivinumOfficium's English rendering.
+#
+# The rendered headings were verified empirically against the English page
+# (missa.pl lang1=lang2=English, the <FONT SIZE='+1' COLOR="red"><B><I>...
+# headings) over a sample of ~70 days spanning Advent through Pentecost:
+# DivinumOfficium translates only Oratio -> 'Collect', Lectio -> 'Lesson',
+# Graduale -> 'Gradual' and Evangelium -> 'Gospel', and leaves Introitus,
+# Offertorium, Secreta, Prefatio, Communio and Postcommunio in Latin. The
+# entries below that differ from those rendered strings (Introit, Epistle,
+# Secret, Preface, Communion, Postcommunion) are therefore display-only; the
+# prose lookup for those falls through to cli.py's Latin-name fallback, which
+# is what DivinumOfficium actually emits. Verified that every section that can
+# occur without citations (Oratio, Secreta, Prefatio, Postcommunio, and
+# occasionally Graduale/Offertorium/Communio) resolves under one of the two.
+SECTION_EN = {
+    "Introitus": "Introit",
+    "Oratio": "Collect",
+    "Lectio": "Epistle",
+    "Graduale": "Gradual",
+    "GradualeP": "Alleluia",
+    "Tractus": "Tract",
+    "Sequentia": "Sequence",
+    "Evangelium": "Gospel",
+    "Offertorium": "Offertory",
+    "Secreta": "Secret",
+    "Prefatio": "Preface",
+    "Communio": "Communion",
+    "Postcommunio": "Postcommunion",
+}
 
-def _section_display(name: str) -> str:
-    if name in SECTION_ES:
-        return SECTION_ES[name]
+SECTIONS = {"es": SECTION_ES, "en": SECTION_EN}
+_COMMEMORATIO = {"es": "Conmemoración", "en": "Commemoration"}
+
+
+def _section_display(name: str, lang: str = "es") -> str:
+    table = SECTIONS[lang]
+    if name in table:
+        return table[name]
     m = re.match(r"^Commemoratio\s+(.*)$", name)
     if m:
-        inner = SECTION_ES.get(m.group(1), m.group(1))
-        return f"Conmemoración ({inner})"
+        inner = table.get(m.group(1), m.group(1))
+        return f"{_COMMEMORATIO[lang]} ({inner})"
     return name
+
+
+# Language-dependent chrome. `bible` is filled with Bible.name so the notes
+# name the actual translation in use.
+_STRINGS = {
+    "es": {
+        "subject": "Español",
+        "colophon": (
+            '<p class="meta">Propios de la Misa<br/>'
+            "(Misal Romano de 1962)<br/>"
+            "Lecturas: {bible_credit}<br/>"
+            "Oraciones: Divinum Officium</p>\n"
+        ),
+        "bible_credit": "Biblia Platense (Mons. Straubinger)",
+        "no_text": "[Texto no disponible en la {bible}: {detail}]",
+        "some_missing": "[Sin texto en la {bible}: {detail}]",
+    },
+    "en": {
+        "subject": "English",
+        "colophon": (
+            '<p class="meta">Proper of the Mass<br/>'
+            "(Roman Missal of 1962)<br/>"
+            "Readings: {bible_credit}<br/>"
+            "Prayers: Divinum Officium</p>\n"
+        ),
+        "bible_credit": "Douay-Rheims Bible (Challoner revision)",
+        "no_text": "[No text in the {bible}: {detail}]",
+        "some_missing": "[Verses without text in the {bible}: {detail}]",
+    },
+}
 
 
 _CSS = """\
@@ -69,27 +135,32 @@ _XHTML_HEAD = """\
 """
 
 
-def _passage_html(bible: Bible, citation) -> str:
+def _passage_html(bible: Bible, citation, lang: str = "es") -> str:
     """Verse text as one justified paragraph with superscript verse numbers."""
+    s = _STRINGS[lang]
     try:
         rows, missing = bible.get_passage(citation)
     except MissingVerseError as e:
         # Loud but non-fatal: some citations (e.g. the Requiem introit from
-        # 4 Esdras) reference apocrypha the Platense Bible never translated.
+        # 4 Esdras) reference apocrypha neither translation ever rendered.
         print(f"WARNING: {e}", file=sys.stderr)
         return (
-            '<p class="passage"><em>[Texto no disponible en la Biblia '
-            f"Platense: {escape(citation.source)}]</em></p>"
+            '<p class="passage"><em>'
+            + escape(s["no_text"].format(bible=bible.name, detail=citation.source))
+            + "</em></p>"
         )
     note = ""
     if missing:
         print(
             f"WARNING: citation {citation.source!r}: verses without text in "
-            f"the Platense Bible: {', '.join(missing)}", file=sys.stderr,
+            f"the {bible.name}: {', '.join(missing)}", file=sys.stderr,
         )
         note = (
-            '<p class="passage"><em>[Sin texto en la Biblia Platense: '
-            f"{escape(', '.join(missing))}]</em></p>"
+            '<p class="passage"><em>'
+            + escape(
+                s["some_missing"].format(bible=bible.name, detail=", ".join(missing))
+            )
+            + "</em></p>"
         )
     multi_chapter = len({ch for ch, _, _ in rows}) > 1
     parts: list[str] = []
@@ -104,8 +175,10 @@ def build_epub(
     date: _dt.date,
     bible: Bible,
     out_path: str,
+    lang: str = "es",
 ) -> str:
     """Write the EPUB for *day* to *out_path* and return the path."""
+    s = _STRINGS[lang]
     title = f"{day.day_name} — {date.isoformat()}"
     book_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"mass-propers/{date.isoformat()}"))
     season = classify_season(day.day_name, day.rank)
@@ -118,17 +191,12 @@ def build_epub(
     if day.rank:
         tp += f'<p class="meta">{escape(day.rank)}</p>\n'
     tp += f'<p class="meta">{date.isoformat()}</p>\n'
-    tp += (
-        '<p class="meta">Propios de la Misa<br/>'
-        "(Misal Romano de 1962)<br/>"
-        "Lecturas: Biblia Platense (Mons. Straubinger)<br/>"
-        "Oraciones: Divinum Officium</p>\n"
-    )
+    tp += s["colophon"].format(bible_credit=s["bible_credit"])
     tp += "</body>\n</html>\n"
     chapters.append(("title.xhtml", escape(title), tp))
 
     for i, section in enumerate(day.sections, 1):
-        disp = _section_display(section.name)
+        disp = _section_display(section.name, lang)
         fname = f"s{i:02d}.xhtml"
         if section.citations:
             page_title = f"{disp}: {section.citations[0].display}"
@@ -138,7 +206,7 @@ def build_epub(
         x += f"<h2>{escape(disp)}</h2>\n"
         for cit in section.citations:
             x += f"<h3>{escape(cit.display)}</h3>\n"
-            x += _passage_html(bible, cit) + "\n"
+            x += _passage_html(bible, cit, lang) + "\n"
         if not section.citations and section.prayer_text:
             x += f'<p class="passage">{escape(section.prayer_text)}</p>\n'
         x += "</body>\n</html>\n"
@@ -166,11 +234,11 @@ def build_epub(
 <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid" version="2.0">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
     <dc:title>{escape(title)}</dc:title>
-    <dc:language>es</dc:language>
+    <dc:language>{lang}</dc:language>
     <dc:identifier id="bookid">urn:uuid:{book_id}</dc:identifier>
     <dc:creator opf:role="edt">mass-propers</dc:creator>
     <dc:date>{date.isoformat()}</dc:date>
-    <dc:subject>Español</dc:subject>
+    <dc:subject>{s["subject"]}</dc:subject>
     <dc:subject>{escape(season)}</dc:subject>
   </metadata>
   <manifest>

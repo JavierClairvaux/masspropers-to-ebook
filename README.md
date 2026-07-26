@@ -1,10 +1,11 @@
-# Mass Propers → Spanish Scripture EPUB
+# Mass Propers → Vernacular Scripture EPUB
 
 Given a Gregorian date, this tool resolves the liturgical day of the **1962
 Missale Romanum** (Tridentine / Extraordinary Form), collects **every Scripture
 citation** used in that day's Mass Propers (readings *and* chant antiphons),
-fetches the corresponding **Spanish Bible text** (Biblia Platense /
-Straubinger), and assembles a minimal **EPUB** suitable for the Xteink X3
+fetches the corresponding **vernacular Bible text** — Spanish (Biblia Platense
+/ Straubinger) by default, or English (Douay-Rheims Challoner) with
+`--lang en` — and assembles a minimal **EPUB** suitable for the Xteink X3
 e-reader (CrossPoint firmware).
 
 Repo: https://github.com/JavierClairvaux/masspropers-to-ebook
@@ -30,6 +31,9 @@ git submodule update --init
 # Generate the EPUB for a date (written to output/<date>_<day-slug>.epub)
 python3 -m masspropers.cli 2026-06-07
 
+# English edition (Douay-Rheims), written to output/<date>_<day-slug>_en.epub
+python3 -m masspropers.cli 2026-06-07 --lang en
+
 # Choose the output path
 python3 -m masspropers.cli 2026-06-07 -o /tmp/propers.epub
 
@@ -39,6 +43,34 @@ python3 -m masspropers.cli 2026-06-07 --list
 # Query the public divinumofficium.com instead of the local Perl CGI
 python3 -m masspropers.cli 2026-06-07 --source remote
 ```
+
+### `--lang`: output language
+
+| `--lang` | Scripture text | Prayer prose | Output filename |
+|---|---|---|---|
+| `es` *(default)* | Biblia Platense (Straubinger), `SpaPlatense.csv` | DivinumOfficium `Espanol` | `<date>_<day-slug>.epub` |
+| `en` | Douay-Rheims Challoner, `DRC.csv` | DivinumOfficium `English` | `<date>_<day-slug>_en.epub` |
+
+Both editions are driven by the **same** Latin-language citation parse; only
+the Bible CSV, the vernacular page fetched for the non-scriptural prayers, the
+section/book display names and the EPUB metadata differ. The Spanish default
+is unchanged and its filename is deliberately left unsuffixed, so existing
+invocations and `generate-sunday.sh` are unaffected.
+
+Douay-Rheims was chosen over CPDV (the only other full-Catholic-canon English
+translation in `bible_databases`) because it is translated *from the Vulgate*,
+matching both the Vulgate-based citations and the Spanish edition's editorial
+choice. Verified for the English edition specifically:
+
+* DRC uses the **Vulgate/Septuagint Psalm numbering**, not the Hebrew/KJV one
+  (Ps 17 = "I will love thee, O Lord"; Ps 22 = "The Lord ruleth me"), with the
+  Hebrew title counted as verse 1 — so Psalm citations resolve identically to
+  the Spanish path. Full deuterocanon present; DRC and SpaPlatense share
+  scrollmapper's identical 78-book, 37 255-row verse skeleton.
+* DRC's verse-merge quirks are **not** SpaPlatense's. It has correct text at
+  Ps 10:8 (where SpaPlatense needs a remap) and at Acts 8:37 and John 6:57
+  (both of which SpaPlatense lacks or shifts). It merges Ps 150:6 into 150:5
+  (remapped) and is genuinely missing 3 Reg 17:19 (reported in-book).
 
 Requirements: Python ≥ 3.10 (stdlib only), Perl 5 with `CGI.pm`
 (`apt install libcgi-pm-perl`) for the default local backend, and the two data

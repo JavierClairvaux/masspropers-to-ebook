@@ -19,7 +19,10 @@ Reference-list grammar (all seen in the corpus):
   Ps:79:2-3              stray colon between book and chapter
   1. Tim 4:8-16.         stray dots
 
-Values are (scrollmapper CSV book key, Spanish display name).
+Values are (scrollmapper CSV book key, Spanish display name). The CSV book key
+doubles as the *English* display name — scrollmapper names books in English in
+every language file — so no parallel English table is needed; ``Citation.lang``
+just selects which of the two the ``display`` property renders.
 """
 
 from __future__ import annotations
@@ -173,26 +176,62 @@ CORRECTIONS: dict[str, str] = {
 }
 
 
+# English display names are derived from the scrollmapper CSV book key (which
+# is already English), so no parallel 90-entry table is needed — only these
+# few overrides, where the key is either misleading or not the traditional
+# English-missal title:
+#
+#   * 'I Esdras'/'II Esdras' are scrollmapper's keys for the Vulgate-appendix
+#     3 Esdras/4 Esdras; rendering the key verbatim would collide with the
+#     canonical Ezra/Nehemiah, which the Douay tradition calls 1/2 Esdras.
+#   * the rest are the Douay-Rheims' own book titles, matching the Latin
+#     abbreviations DivinumOfficium cites them by (Eccli, Cant, Apoc).
+BOOK_ENGLISH: dict[str, str] = {
+    "I Esdras": "3 Esdras",
+    "II Esdras": "4 Esdras",
+    "Sirach": "Ecclesiasticus",
+    "Song of Solomon": "Canticle of Canticles",
+    "Revelation of John": "Apocalypse",
+}
+
+_ORDINAL_PREFIX_RE = re.compile(r"^(I{1,3})\s+")
+_ROMAN_TO_ARABIC = {"I": "1", "II": "2", "III": "3"}
+
+
+def _english_book(book_key: str) -> str:
+    """'I John' -> '1 John'; 'Sirach' -> 'Ecclesiasticus'; 'Psalms' -> 'Psalms'."""
+    if book_key in BOOK_ENGLISH:
+        return BOOK_ENGLISH[book_key]
+    return _ORDINAL_PREFIX_RE.sub(
+        lambda m: _ROMAN_TO_ARABIC[m.group(1)] + " ", book_key
+    )
+
+
 @dataclass
 class Citation:
     """A parsed scripture citation."""
 
     source: str                      # citation string as found in the page
     book_key: str                    # scrollmapper CSV book name
-    book_spanish: str                # display name
+    book_spanish: str                # Spanish display name
     # Ordered (chapter, verses) pairs; verses == None means the whole chapter.
     refs: list[tuple[int, list[int] | None]] = field(default_factory=list)
+    lang: str = "es"                 # which display name `display` renders
+
+    @property
+    def book_display(self) -> str:
+        return self.book_spanish if self.lang == "es" else _english_book(self.book_key)
 
     @property
     def display(self) -> str:
-        """Human-readable Spanish citation, e.g. '1 Juan 3:13-18'."""
+        """Human-readable citation, e.g. '1 Juan 3:13-18' / '1 John 3:13-18'."""
         parts = []
         for ch, verses in self.refs:
             if verses is None:
                 parts.append(str(ch))
             else:
                 parts.append(f"{ch}:{_compress_verses(verses)}")
-        return f"{self.book_spanish} {'; '.join(parts)}"
+        return f"{self.book_display} {'; '.join(parts)}"
 
 
 def _compress_verses(verses: list[int]) -> str:
@@ -225,8 +264,11 @@ def looks_like_citation(text: str) -> bool:
     return bool(_CITATION_RE.match(text.strip()))
 
 
-def parse_citation(text: str) -> Citation:
+def parse_citation(text: str, lang: str = "es") -> Citation:
     """Parse a citation string into a Citation, or raise.
+
+    *lang* only selects the display language of the resulting Citation; the
+    citation grammar and the CSV book key are language-independent.
 
     Raises UnknownBookError if the book abbreviation is not mapped (extend
     BOOK_MAP in that case) and CitationSyntaxError for unparseable references.
@@ -258,7 +300,7 @@ def parse_citation(text: str) -> Citation:
     if not refs:
         raise CitationSyntaxError(f"no chapter/verse references in {text!r}")
     return Citation(source=original, book_key=book_key,
-                    book_spanish=spanish, refs=refs)
+                    book_spanish=spanish, refs=refs, lang=lang)
 
 
 def _parse_chunk(

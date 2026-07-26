@@ -61,7 +61,7 @@ class Section:
     citations: list[Citation] = field(default_factory=list)
     # Set only for non-scriptural propers (Oratio/Secreta/Postcommunio etc.)
     # that have no Scripture citation to look up — DivinumOfficium's own
-    # Spanish prose is used verbatim instead. See parse_propers_prose().
+    # target-language prose is used verbatim instead. See parse_propers_prose().
     prayer_text: str | None = None
 
 
@@ -80,12 +80,12 @@ def _clean(text: str) -> str:
     return _html.unescape(text).strip()
 
 
-def _classify(candidate: str) -> Citation | None:
+def _classify(candidate: str, lang: str = "es") -> Citation | None:
     """Return a Citation, None for a label, or raise for unknown books."""
     if not looks_like_citation(candidate):
         return None
     try:
-        return parse_citation(candidate)
+        return parse_citation(candidate, lang)
     except UnknownBookError:
         # 'Antiphona 2' or 'c. 12' are labels: a lone trailing number with no
         # verse punctuation. Anything with :,- in its reference part really
@@ -98,7 +98,9 @@ def _classify(candidate: str) -> Citation | None:
         return None
 
 
-def parse_propers_html(body: str) -> DayPropers:
+def parse_propers_html(body: str, lang: str = "es") -> DayPropers:
+    """Parse the Latin-language propers page. *lang* only sets the display
+    language of the extracted Citations; parsing itself is unaffected."""
     m = _DAY_RE.search(body)
     day_name, rank = "Unknown day", ""
     if m:
@@ -122,7 +124,7 @@ def parse_propers_html(body: str) -> DayPropers:
         section = Section(name=name)
         for cand in _REDITALIC_RE.findall(block):
             cand = _clean(cand)
-            cit = _classify(cand)
+            cit = _classify(cand, lang)
             if cit is not None:
                 section.citations.append(cit)
         rest = _NAV_RE.sub("", _TITLE_RE.sub("", block, count=1))
@@ -135,13 +137,18 @@ def parse_propers_prose(body: str) -> dict[str, str]:
     """Map section name -> plain prose text, for every proper part on the page.
 
     No citation parsing/classification at all (deliberately) — this is meant
-    to run against DivinumOfficium's own Spanish-language rendering, whose
-    citation abbreviations aren't in BOOK_MAP and would otherwise risk an
-    UnknownBookError for sections we don't even need citations from. Callers
-    only use the prose for sections that came back with zero citations from
-    the Latin-language parse (Oratio/Secreta/Postcommunio) — the actual
-    Scripture text still comes from SpaPlatense via the Latin-parsed
-    citations, never from here.
+    to run against DivinumOfficium's own vernacular rendering (Espanol,
+    English, ...), whose citation abbreviations aren't in BOOK_MAP and would
+    otherwise risk an UnknownBookError for sections we don't even need
+    citations from. Callers only use the prose for sections that came back
+    with zero citations from the Latin-language parse (Oratio/Secreta/
+    Postcommunio) — the actual Scripture text still comes from the Bible CSV
+    via the Latin-parsed citations, never from here.
+
+    Note the section headings in the returned dict are themselves translated
+    by DivinumOfficium's renderer (Oratio -> 'Colecta' on the Spanish page,
+    'Collect' on the English one), so callers must look up by the rendered
+    name; see epub.SECTION_ES / epub.SECTION_EN.
     """
     prose: dict[str, str] = {}
     blocks = re.split(r"<TR><TD[^>]*>", body)
