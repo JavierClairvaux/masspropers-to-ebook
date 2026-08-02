@@ -195,3 +195,64 @@ def classify_season(day_name: str, rank: str = "") -> str:
         if re.search(pattern, haystack):
             return season
     return "Sanctorale"
+
+
+# Short slug per season, per output language — used for the compact
+# filename/title (see compact_name()). Deliberately not the same strings as
+# classify_season()'s Latin labels, which are used for the Calibre tag.
+_SEASON_SLUG: dict[str, dict[str, str]] = {
+    "Adventus": {"es": "adviento", "en": "advent"},
+    "Tempus Nativitatis": {"es": "navidad", "en": "christmastide"},
+    "Tempus post Epiphaniam": {"es": "epifania", "en": "epiphany"},
+    "Quadragesima": {"es": "cuaresma", "en": "lent"},
+    "Tempus Paschale": {"es": "pascua", "en": "eastertide"},
+    "Tempus post Pentecosten": {"es": "postpentecostes", "en": "postpentecost"},
+}
+
+_ROMAN_RE = re.compile(r"\b([IVXLCDM]+)\b")
+
+
+def _slug_ascii(s: str) -> str:
+    s = s.lower()
+    s = re.sub(r"[àáâã]", "a", s)
+    s = re.sub(r"[èéê]", "e", s)
+    s = re.sub(r"[ìíî]", "i", s)
+    s = re.sub(r"[òóô]", "o", s)
+    s = re.sub(r"[ùúû]", "u", s)
+    s = re.sub(r"æ", "ae", s)
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s
+
+
+def compact_name(day_name: str, rank: str, lang: str = "es") -> str:
+    """A short, human-readable name for the filename and EPUB title.
+
+    Examples: 'ix-postpentecostes' (Dominica IX Post Pentecosten), 'ii-adviento'
+    (Dominica II Adventus), 'sanctorale-pantaleonis' (a fixed feast with no
+    numbered season — first significant word of the name, genitive form as
+    DivinumOfficium writes it, not prettified to the nominative).
+
+    Note: within a numbered Tempora week, this collides across different
+    weekdays (e.g. every day of "Hebdomadam IX post Pentecosten" produces the
+    same slug) — fine for this tool's actual use (the cron job only ever
+    generates Sundays), but if you start generating weekday dates too, you'll
+    need to disambiguate further.
+
+    Heuristic over the rendered day name, same caveat as classify_season() —
+    verify unusual/new day names by testing rather than assuming this is exact.
+    """
+    season = classify_season(day_name, rank)
+    if season == "Sanctorale":
+        # Skip title abbreviations (S., Ss., In, etc.) and short connectors
+        # so e.g. "Ss. Petri et Pauli" slugs to "petri", not "ss".
+        stop = {"et", "de", "in", "festo"}
+        words = [
+            w for w in re.split(r"\s+", day_name)
+            if not w.endswith(".") and w.lower() not in stop and len(w) > 1
+        ]
+        first = words[0] if words else day_name
+        return f"sanctorale-{_slug_ascii(first)}"
+
+    m = _ROMAN_RE.search(day_name)
+    ordinal = m.group(1).lower() if m else "x"
+    return f"{ordinal}-{_SEASON_SLUG[season][lang]}"

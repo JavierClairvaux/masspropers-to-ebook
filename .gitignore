@@ -28,3 +28,6 @@ auth.token
 
 # Leftover artifacts from setup
 *.zip
+
+#logs
+*.log

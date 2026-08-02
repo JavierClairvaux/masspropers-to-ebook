@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
-import re
+import os
 import sys
 
 from .bible import Bible
 from .epub import SECTIONS, build_epub
 from .fetch import VERSION_1962, fetch_propers_html
-from .parse import parse_propers_html, parse_propers_prose
+from .parse import compact_name, parse_propers_html, parse_propers_prose
 
 # Output language -> DivinumOfficium language-folder name, i.e. the value
 # missa.pl takes for lang1/lang2. Both folders exist under
@@ -27,18 +27,6 @@ def _parse_date(s: str) -> _dt.date:
     raise argparse.ArgumentTypeError(f"unrecognised date {s!r} (use YYYY-MM-DD)")
 
 
-def _slug(s: str) -> str:
-    s = s.lower()
-    s = re.sub(r"[àáâã]", "a", s)
-    s = re.sub(r"[èéê]", "e", s)
-    s = re.sub(r"[ìíî]", "i", s)
-    s = re.sub(r"[òóô]", "o", s)
-    s = re.sub(r"[ùúû]", "u", s)
-    s = re.sub(r"æ", "ae", s)
-    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
-    return s[:60]
-
-
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="mass-propers",
@@ -53,8 +41,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "-o", "--output", default=None,
-        help="output EPUB path (default: output/<date>_<day>.epub, with an "
-        "_en suffix for --lang en)",
+        help="output EPUB path (default: output/<lang>-<feast>.epub, e.g. "
+        "output/es-ix-postpentecostes.epub)",
     )
     ap.add_argument(
         "--source", choices=("local", "remote"), default="local",
@@ -62,6 +50,12 @@ def main(argv: list[str] | None = None) -> int:
         "remote: query divinumofficium.com (may be blocked by Cloudflare)",
     )
     ap.add_argument("--no-cache", action="store_true", help="ignore the fetch cache")
+    ap.add_argument(
+        "--force", action="store_true",
+        help="regenerate even if the target EPUB already exists (default: "
+        "skip — filenames have no date in them, so the same liturgical day "
+        "in a later year reuses the same filename)",
+    )
     ap.add_argument(
         "--list", action="store_true", dest="list_only",
         help="only print the resolved day and its citations; no EPUB",
@@ -76,6 +70,13 @@ def main(argv: list[str] | None = None) -> int:
           + (f" ({day.rank})" if day.rank else ""))
     for sec_name, cit in day.all_citations():
         print(f"  [{sec_name}] {cit.source}  ->  {cit.display}")
+
+    out = args.output or (
+        f"output/{args.lang}-{compact_name(day.day_name, day.rank, args.lang)}.epub"
+    )
+    if not args.list_only and not args.force and os.path.exists(out):
+        print(f"{out} already exists; skipping (use --force to regenerate).")
+        return 0
 
     # Non-scriptural propers (Oratio/Secreta/Postcommunio — original prayers,
     # not Scripture) have no citation to look up in the Bible CSV. For those
@@ -115,12 +116,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     bible = Bible.for_lang(args.lang)
-    # The Spanish filename is left unsuffixed so existing invocations (and
-    # generate-sunday.sh) keep producing exactly the same path as before.
-    suffix = "" if args.lang == "es" else f"_{args.lang}"
-    out = args.output or (
-        f"output/{args.date.isoformat()}_{_slug(day.day_name)}{suffix}.epub"
-    )
     build_epub(day, args.date, bible, out, args.lang)
     print(f"Wrote {out}")
     return 0

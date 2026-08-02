@@ -15,7 +15,7 @@ import zipfile
 from xml.sax.saxutils import escape
 
 from .bible import Bible, MissingVerseError
-from .parse import DayPropers, classify_season
+from .parse import DayPropers, classify_season, compact_name
 
 # Traditional Spanish names for the proper parts, in their liturgical order.
 # Unmapped section names fall back to the Latin name as-is.
@@ -179,7 +179,10 @@ def build_epub(
 ) -> str:
     """Write the EPUB for *day* to *out_path* and return the path."""
     s = _STRINGS[lang]
-    title = f"{day.day_name} — {date.isoformat()}"
+    # Short title for Calibre's library/OPDS view — the in-book title page
+    # below still shows the full Latin day name for readers.
+    short = compact_name(day.day_name, day.rank, lang).upper().replace("-", " ")
+    title = f"[{lang.upper()}] {short} ({date.isoformat()})"
     book_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"mass-propers/{date.isoformat()}"))
     season = classify_season(day.day_name, day.rank)
 
