@@ -96,6 +96,7 @@ _STRINGS = {
         "bible_credit": "Biblia Platense (Mons. Straubinger)",
         "no_text": "[Texto no disponible en la {bible}: {detail}]",
         "some_missing": "[Sin texto en la {bible}: {detail}]",
+        "alleluia": "Aleluya",
     },
     "en": {
         "subject": "English",
@@ -108,6 +109,7 @@ _STRINGS = {
         "bible_credit": "Douay-Rheims Bible (Challoner revision)",
         "no_text": "[No text in the {bible}: {detail}]",
         "some_missing": "[Verses without text in the {bible}: {detail}]",
+        "alleluia": "Alleluia",
     },
 }
 
@@ -119,6 +121,7 @@ h2 { font-size: 1.2em; margin: 1em 0 0.2em 0; }
 h3 { font-size: 1em; font-style: italic; margin: 0.8em 0 0.2em 0; }
 p.meta { text-align: center; font-style: italic; margin: 0.2em 0; }
 p.passage { margin: 0.2em 0 0.6em 0; text-align: justify; }
+p.alleluia { margin: 0.2em 0 0.6em 0; font-style: italic; }
 sup.v { font-size: 0.7em; }
 """
 
@@ -170,6 +173,19 @@ def _passage_html(bible: Bible, citation, lang: str = "es") -> str:
     return '<p class="passage">' + " ".join(parts) + "</p>" + note
 
 
+def _alleluia_html(count: int, lang: str = "es") -> str:
+    """'Aleluya, aleluya.' (count=2) / 'Aleluya.' (count=1); '' for count<=0.
+
+    Matches the source's own capitalisation convention (e.g. 'Allelúia,
+    allelúia.'): capitalised once, lower-case on every repeat.
+    """
+    if count <= 0:
+        return ""
+    word = _STRINGS[lang]["alleluia"]
+    words = [word] + [word.lower()] * (count - 1)
+    return f'<p class="alleluia">{escape(", ".join(words))}.</p>\n'
+
+
 def build_epub(
     day: DayPropers,
     date: _dt.date,
@@ -207,9 +223,11 @@ def build_epub(
             page_title = disp
         x = _XHTML_HEAD.format(title=escape(page_title))
         x += f"<h2>{escape(disp)}</h2>\n"
+        x += _alleluia_html(section.leading_alleluia, lang)
         for cit in section.citations:
             x += f"<h3>{escape(cit.display)}</h3>\n"
             x += _passage_html(bible, cit, lang) + "\n"
+            x += _alleluia_html(cit.alleluia_after, lang)
         if not section.citations and section.prayer_text:
             x += f'<p class="passage">{escape(section.prayer_text)}</p>\n'
         x += "</body>\n</html>\n"

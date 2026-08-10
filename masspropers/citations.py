@@ -18,6 +18,10 @@ Reference-list grammar (all seen in the corpus):
   Act 1, 15-26           European style: chapter COMMA verses (no colon)
   Ps:79:2-3              stray colon between book and chapter
   1. Tim 4:8-16.         stray dots
+  Ps 27:7 27:1           repeated 'chapter:verse' joined by a bare space
+                          instead of a comma (the Gradual R/V pattern —
+                          normalised to '27:7,1' before the grammar above
+                          ever sees it; see _normalize_repeated_chapter())
 
 Values are (scrollmapper CSV book key, Spanish display name). The CSV book key
 doubles as the *English* display name — scrollmapper names books in English in
@@ -197,6 +201,29 @@ BOOK_ENGLISH: dict[str, str] = {
 _ORDINAL_PREFIX_RE = re.compile(r"^(I{1,3})\s+")
 _ROMAN_TO_ARABIC = {"I": "1", "II": "2", "III": "3"}
 
+# DivinumOfficium sometimes writes a Gradual's non-contiguous verses as
+# repeated 'chapter:verse' pairs joined by a bare space instead of a comma —
+# e.g. 'Ps 27:7 27:1' (Ps 27:7 and 27:1), 'Luc 1:28 1:42', 'Sap 11:24 11:25;
+# 11:27'. The backreference requires the repeated chapter number to match
+# exactly, so this can't misfire on two genuinely different chapters sitting
+# next to each other. Collapsed to '27:7,1' etc. *before* the ';'-split
+# grammar below ever runs, since that grammar has no notion of 'same chapter,
+# no separator'.
+_REPEATED_CHAPTER_RE = re.compile(
+    r"(?P<ch>\d+):(?P<v1>\d+(?:-\d+)?)(?P<rest>(?:\s+(?P=ch):\d+(?:-\d+)?)+)"
+)
+
+
+def _normalize_repeated_chapter(refs_str: str) -> str:
+    def repl(m: re.Match) -> str:
+        ch = m.group("ch")
+        verses = [m.group("v1")] + re.findall(
+            rf"{re.escape(ch)}:(\d+(?:-\d+)?)", m.group("rest")
+        )
+        return f"{ch}:" + ",".join(verses)
+
+    return _REPEATED_CHAPTER_RE.sub(repl, refs_str)
+
 
 def _english_book(book_key: str) -> str:
     """'I John' -> '1 John'; 'Sirach' -> 'Ecclesiasticus'; 'Psalms' -> 'Psalms'."""
@@ -217,6 +244,13 @@ class Citation:
     # Ordered (chapter, verses) pairs; verses == None means the whole chapter.
     refs: list[tuple[int, list[int] | None]] = field(default_factory=list)
     lang: str = "es"                 # which display name `display` renders
+    # How many 'Allelúia's DivinumOfficium's Latin rendering prints right
+    # after this citation's verse text (0 outside Alleluia-bearing seasons,
+    # 1 after an Alleluia-verse, 2 after the Gradual verse it follows the
+    # Gradual). Set by parse.parse_propers_html(); see Section.leading_alleluia
+    # for the refrain that precedes the *first* citation in double-Alleluia
+    # weeks (Eastertide/Pentecost octave).
+    alleluia_after: int = 0
 
     @property
     def book_display(self) -> str:
@@ -287,7 +321,7 @@ def parse_citation(text: str, lang: str = "es") -> Citation:
         )
     book_key, spanish = BOOK_MAP[norm]
 
-    refs_str = m.group("refs").rstrip(" .")
+    refs_str = _normalize_repeated_chapter(m.group("refs").rstrip(" ."))
     refs: list[tuple[int, list[int] | None]] = []
     last_chapter: int | None = None
     for chunk in refs_str.split(";"):

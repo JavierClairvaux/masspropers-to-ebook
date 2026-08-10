@@ -42,6 +42,14 @@ _TITLE_RE = re.compile(
     r"<FONT SIZE='\+1' COLOR=\"red\"><B><I>\s*(.*?)\s*</I></B></FONT>", re.S
 )
 _REDITALIC_RE = re.compile(r"<FONT COLOR=\"red\"><I>(.*?)</I></FONT>", re.S)
+# Same pattern, but keeping the whole span (not just its inner text) as a
+# split delimiter, so the prose between two consecutive spans stays
+# recoverable — used to find which citation an 'Allelúia' trails.
+_REDITALIC_SPLIT_RE = re.compile(r"(<FONT COLOR=\"red\"><I>.*?</I></FONT>)", re.S)
+# DivinumOfficium prints 'Allelúia'/'Alleluia' (never accented in English
+# rendering, but this parses the Latin page, which always accents it) once
+# after an Alleluia verse and twice after the Gradual verse it follows.
+_ALLELUIA_RE = re.compile(r"allel[uú]ia", re.I)
 
 # The page-navigation "Top / Next / Prev" links each block starts with —
 # boilerplate UI, not content. Strip before extracting prose or checking
@@ -63,6 +71,14 @@ class Section:
     # that have no Scripture citation to look up — DivinumOfficium's own
     # target-language prose is used verbatim instead. See parse_propers_prose().
     prayer_text: str | None = None
+    # 'Allelúia, allelúia' sung *before* the first citation — the refrain
+    # that opens a double-Alleluia Graduale block (Eastertide/the Pentecost
+    # octave, where the Gradual proper is replaced by two Alleluia verses).
+    # 0 outside those weeks. Each citation's own *trailing* Alleluia(s) — the
+    # ordinary case, e.g. after the Gradual verse or after each Alleluia
+    # verse — live on Citation.alleluia_after instead, since they belong to
+    # one specific verse rather than the section as a whole.
+    leading_alleluia: int = 0
 
 
 @dataclass
@@ -78,6 +94,10 @@ class DayPropers:
 def _clean(text: str) -> str:
     text = re.sub(r"<[^>]+>", "", text)
     return _html.unescape(text).strip()
+
+
+def _count_alleluias(html_fragment: str) -> int:
+    return len(_ALLELUIA_RE.findall(_clean(html_fragment)))
 
 
 def _classify(candidate: str, lang: str = "es") -> Citation | None:
@@ -122,13 +142,43 @@ def parse_propers_html(body: str, lang: str = "es") -> DayPropers:
         if name in _ORDINARY_SECTIONS:
             continue
         section = Section(name=name)
-        for cand in _REDITALIC_RE.findall(block):
-            cand = _clean(cand)
+        # Nav links/title stripped first so pieces[0] below is pure prose —
+        # otherwise the boilerplate 'Top / Next' DIV and the title's own
+        # <FONT> markup (a different tag shape, so _REDITALIC_SPLIT_RE
+        # doesn't split on it) would sit in front of the first real citation.
+        content = _NAV_RE.sub("", _TITLE_RE.sub("", block, count=1))
+        # On every day with a Sequence (Easter, Pentecost, Corpus Christi,
+        # Requiem, ...), DivinumOfficium smuggles 'Sequentia' into the same
+        # <TD> as 'Graduale' with no <TR><TD> boundary between them — the
+        # block-split above can't separate them. Truncate at that embedded
+        # title so the Sequence's own prose (which ends "Amen. Allelúia.")
+        # can't be mistaken for this section's content, e.g. bleeding an
+        # extra Alleluia onto the Gradual's last citation.
+        next_title = _TITLE_RE.search(content)
+        if next_title:
+            content = content[: next_title.start()]
+        pieces = _REDITALIC_SPLIT_RE.split(content)
+        # pieces alternates prose, span, prose, span, ...; even indices are
+        # prose, odd indices are the '<FONT COLOR="red"><I>...</I></FONT>'
+        # spans themselves (citations and labels like '℣.' alike).
+        last_citation: Citation | None = None
+        section.leading_alleluia += _count_alleluias(pieces[0])
+        for i in range(1, len(pieces), 2):
+            cand = _clean(_REDITALIC_RE.search(pieces[i]).group(1))
             cit = _classify(cand, lang)
             if cit is not None:
                 section.citations.append(cit)
-        rest = _NAV_RE.sub("", _TITLE_RE.sub("", block, count=1))
-        if section.citations or _clean(rest):
+                last_citation = cit
+            trailing = pieces[i + 1] if i + 1 < len(pieces) else ""
+            count = _count_alleluias(trailing)
+            if last_citation is not None:
+                last_citation.alleluia_after += count
+            else:
+                # An Alleluia refrain (or one trailing a label) before any
+                # citation has been seen yet — belongs to the section, same
+                # as the pieces[0] case above.
+                section.leading_alleluia += count
+        if section.citations or _clean(content):
             day.sections.append(section)
     return day
 
