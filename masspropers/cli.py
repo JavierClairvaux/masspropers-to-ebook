@@ -17,6 +17,63 @@ from .parse import compact_name, parse_propers_html, parse_propers_prose
 # divinum-officium/web/www/missa/ and were verified to render.
 DO_LANG = {"es": "Espanol", "en": "English"}
 
+# --latin's per-section names, both the canonical Latin Section.name a day
+# actually uses and the short/EN/ES aliases someone would plausibly type on
+# the command line -> canonical name. Deliberately liberal (extra harmless
+# synonyms) since an unrecognised token is a hard error (see
+# _resolve_latin_sections) and there's no completion to lean on.
+_LATIN_SECTION_ALIASES: dict[str, str] = {}
+
+
+def _add_latin_alias(canonical: str, *aliases: str) -> None:
+    _LATIN_SECTION_ALIASES[canonical.lower()] = canonical
+    for a in aliases:
+        _LATIN_SECTION_ALIASES[a.lower()] = canonical
+
+
+_add_latin_alias("Introitus", "introit", "introito")
+_add_latin_alias("Oratio", "collect", "colecta", "oracion", "oración")
+_add_latin_alias("Lectio", "epistola", "epístola", "epistle", "lesson", "lectura")
+_add_latin_alias("Graduale", "gradual")
+_add_latin_alias("GradualeP", "alleluia", "aleluya")
+_add_latin_alias("Tractus", "tract", "tracto")
+_add_latin_alias("Sequentia", "sequence", "secuencia")
+_add_latin_alias("Evangelium", "evangelio", "gospel")
+_add_latin_alias("Offertorium", "offertory", "ofertorio")
+_add_latin_alias("Secreta", "secret")
+_add_latin_alias("Prefatio", "preface", "prefacio")
+_add_latin_alias("Communio", "communion", "comunion", "comunión")
+_add_latin_alias("Postcommunio", "postcommunion", "poscomunion", "poscomunión")
+
+# nargs='?' const, meaning "--latin" with no value at all (as opposed to
+# omitted entirely, which stays None).
+_LATIN_ALL = "__ALL__"
+
+
+def _resolve_latin_sections(value: str, day_section_names: list[str]) -> set[str]:
+    """Turn --latin's value into a set of canonical Section.name strings.
+
+    *value* is _LATIN_ALL (bare --latin) or a user-typed comma list, matched
+    against _LATIN_SECTION_ALIASES case-insensitively. Raises ValueError on
+    an unrecognised token, listing the valid ones; the caller turns that into
+    an argparse-style usage error.
+    """
+    if value == _LATIN_ALL:
+        return set(day_section_names)
+    resolved: set[str] = set()
+    for token in value.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        canonical = _LATIN_SECTION_ALIASES.get(token.lower())
+        if canonical is None:
+            valid = ", ".join(sorted(set(_LATIN_SECTION_ALIASES.values())))
+            raise ValueError(
+                f"--latin: unrecognised section {token!r}. Valid sections: {valid}"
+            )
+        resolved.add(canonical)
+    return resolved
+
 
 def _parse_date(s: str) -> _dt.date:
     for fmt in ("%Y-%m-%d", "%m-%d-%Y", "%d.%m.%Y"):
@@ -60,6 +117,16 @@ def main(argv: list[str] | None = None) -> int:
         "--list", action="store_true", dest="list_only",
         help="only print the resolved day and its citations; no EPUB",
     )
+    ap.add_argument(
+        "--latin", nargs="?", const=_LATIN_ALL, default=None,
+        metavar="SEC1,SEC2,...",
+        help="also print the Latin text, above the translation under the "
+        "same heading. Bare --latin does this for every section that day "
+        "has; --latin=introit,evangelium limits it to a comma-separated "
+        "list (aliases accepted, e.g. collect/colecta for Oratio, "
+        "epistle/epistola for Lectio, gospel/evangelio for Evangelium). "
+        "Omit entirely for the old Latin-free output (default).",
+    )
     args = ap.parse_args(argv)
 
     body = fetch_propers_html(
@@ -70,6 +137,15 @@ def main(argv: list[str] | None = None) -> int:
           + (f" ({day.rank})" if day.rank else ""))
     for sec_name, cit in day.all_citations():
         print(f"  [{sec_name}] {cit.source}  ->  {cit.display}")
+
+    latin_sections: set[str] = set()
+    if args.latin is not None:
+        try:
+            latin_sections = _resolve_latin_sections(
+                args.latin, [s.name for s in day.sections]
+            )
+        except ValueError as e:
+            ap.error(str(e))
 
     out = args.output or (
         f"output/{args.lang}-{compact_name(day.day_name, day.rank, args.lang)}.epub"
@@ -104,8 +180,24 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"WARNING: no prose found for [{s.name}] in the "
                       f"{do_lang} DivinumOfficium page; section will be "
                       f"omitted.", file=sys.stderr)
+        if latin_sections:
+            # No extra fetch needed: `body` above is already the plain Latin
+            # page, fetched for citations, and it carries this same prose
+            # (parse_propers_prose() ignores citations entirely — see its
+            # docstring) keyed directly by the Latin names already on hand,
+            # no SECTIONS[lang] translation needed.
+            latin_prose = parse_propers_prose(body)
+            for s in prayer_sections:
+                if s.name not in latin_sections:
+                    continue
+                s.latin_text = latin_prose.get(s.name)
+                if not s.latin_text:
+                    print(f"WARNING: no Latin prose found for [{s.name}]; "
+                          f"--latin will be omitted for that section.",
+                          file=sys.stderr)
         day.sections = [
-            s for s in day.sections if s.citations or s.prayer_text
+            s for s in day.sections
+            if s.citations or s.prayer_text or s.latin_text
         ]
 
     if not day.sections:
@@ -116,7 +208,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     bible = Bible.for_lang(args.lang)
-    build_epub(day, args.date, bible, out, args.lang)
+    latin_bible = Bible.for_lang("la") if latin_sections else None
+    build_epub(
+        day, args.date, bible, out, args.lang,
+        latin_bible=latin_bible, latin_sections=latin_sections,
+    )
     print(f"Wrote {out}")
     return 0
 

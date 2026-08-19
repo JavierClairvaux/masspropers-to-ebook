@@ -42,7 +42,27 @@ python3 -m masspropers.cli 2026-06-07 --list
 
 # Query the public divinumofficium.com instead of the local Perl CGI
 python3 -m masspropers.cli 2026-06-07 --source remote
+
+# Latin above the translation, under the same heading, for every section
+python3 -m masspropers.cli 2026-06-07 --latin
+
+# ...or only for some sections (aliases accepted: collect/colecta, epistle/
+# epistola, gospel/evangelio, ...; see cli.py's _LATIN_SECTION_ALIASES)
+python3 -m masspropers.cli 2026-06-07 --latin=introit,evangelium
 ```
+
+### `--latin`: bilingual sections
+
+Off by default (unchanged output). Bare `--latin` prints the Vulgate text
+first, then the translation, under the same heading, for every proper part
+that day has; `--latin=SEC1,SEC2` limits it to a comma-separated list. For
+scriptural sections (Introitus, Lectio, Graduale, Evangelium, ...) the Latin
+comes from the Vulgate CSV via the same citations already parsed off the
+Latin page; for the prayers (Oratio/Secreta/Postcommunio) it's DivinumOfficium's
+own Latin prose — parsed with the same commemoration-dropping logic as the
+translation (see `parse_propers_prose()` in `parse.py`), so a day with a
+commemorated saint shows only the primary oration in both languages, not a
+second one appended.
 
 ### `--lang`: output language
 

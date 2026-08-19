@@ -40,6 +40,13 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _CSV_DIR = os.path.join(os.path.dirname(_HERE), "bible_databases", "formats", "csv")
 DEFAULT_CSV = os.path.join(_CSV_DIR, "SpaPlatense.csv")
 DRC_CSV = os.path.join(_CSV_DIR, "DRC.csv")
+# The Clementine Vulgate itself — same scrollmapper skeleton as the other two
+# (37255 rows, identical 78-book set incl. deuterocanon), confirmed to already
+# carry real text at both SpaPlatense's and DRC's respective merge points
+# (Ps 10:8, Ps 150:6), so no VERSE_REMAP is needed for it. Used for the
+# optional --latin CLI flag (cli.py), which prints this text ahead of the
+# translation instead of DivinumOfficium's own citation-only Latin page.
+VULGATE_CSV = os.path.join(_CSV_DIR, "Vulgate.csv")
 
 
 class MissingVerseError(KeyError):
@@ -77,9 +84,13 @@ VERSE_REMAP_DRC: dict[tuple[str, int, int], tuple[str, int, int]] = {
 }
 
 # lang -> (CSV path, verse remap, translation name used in on-page notes).
+# "la" isn't an *output* language (cli.py's --lang only offers es/en — there's
+# no Spanish/English chrome string for it) — it's only ever loaded directly
+# via Bible.for_lang("la") for the --latin flag's side-by-side Vulgate text.
 EDITIONS: dict[str, tuple[str, dict, str]] = {
     "es": (DEFAULT_CSV, VERSE_REMAP, "Biblia Platense"),
     "en": (DRC_CSV, VERSE_REMAP_DRC, "Douay-Rheims Bible"),
+    "la": (VULGATE_CSV, {}, "Vulgata"),
 }
 
 

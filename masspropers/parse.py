@@ -82,6 +82,14 @@ class Section:
     # that have no Scripture citation to look up — DivinumOfficium's own
     # target-language prose is used verbatim instead. See parse_propers_prose().
     prayer_text: str | None = None
+    # Latin prose for this same non-scriptural proper, set only when the
+    # --latin CLI flag requests it for this section. Parsed the same way as
+    # prayer_text (parse_propers_prose(), same commemoration-dropping
+    # behaviour) but run against the plain Latin page that's already fetched
+    # for citations, so no extra fetch is needed. Scriptural sections don't
+    # use this field — their Latin verse text is looked up straight from the
+    # Vulgate CSV at EPUB-build time via the same Citations already on hand.
+    latin_text: str | None = None
     # 'Allelúia, allelúia' sung *before* the first citation — the refrain
     # that opens a double-Alleluia Graduale block (Eastertide/the Pentecost
     # octave, where the Gradual proper is replaced by two Alleluia verses).

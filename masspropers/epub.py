@@ -121,6 +121,7 @@ h2 { font-size: 1.2em; margin: 1em 0 0.2em 0; }
 h3 { font-size: 1em; font-style: italic; margin: 0.8em 0 0.2em 0; }
 p.meta { text-align: center; font-style: italic; margin: 0.2em 0; }
 p.passage { margin: 0.2em 0 0.6em 0; text-align: justify; }
+p.latin { font-style: italic; }
 p.alleluia { margin: 0.2em 0 0.6em 0; font-style: italic; }
 sup.v { font-size: 0.7em; }
 """
@@ -138,9 +139,16 @@ _XHTML_HEAD = """\
 """
 
 
-def _passage_html(bible: Bible, citation, lang: str = "es") -> str:
-    """Verse text as one justified paragraph with superscript verse numbers."""
+def _passage_html(
+    bible: Bible, citation, lang: str = "es", extra_class: str = ""
+) -> str:
+    """Verse text as one justified paragraph with superscript verse numbers.
+
+    *extra_class* adds a CSS class (currently just "latin", for the --latin
+    flag's side-by-side Vulgate text) alongside the base "passage" class.
+    """
     s = _STRINGS[lang]
+    cls = "passage" + (f" {extra_class}" if extra_class else "")
     try:
         rows, missing = bible.get_passage(citation)
     except MissingVerseError as e:
@@ -148,7 +156,7 @@ def _passage_html(bible: Bible, citation, lang: str = "es") -> str:
         # 4 Esdras) reference apocrypha neither translation ever rendered.
         print(f"WARNING: {e}", file=sys.stderr)
         return (
-            '<p class="passage"><em>'
+            f'<p class="{cls}"><em>'
             + escape(s["no_text"].format(bible=bible.name, detail=citation.source))
             + "</em></p>"
         )
@@ -159,7 +167,7 @@ def _passage_html(bible: Bible, citation, lang: str = "es") -> str:
             f"the {bible.name}: {', '.join(missing)}", file=sys.stderr,
         )
         note = (
-            '<p class="passage"><em>'
+            f'<p class="{cls}"><em>'
             + escape(
                 s["some_missing"].format(bible=bible.name, detail=", ".join(missing))
             )
@@ -170,7 +178,7 @@ def _passage_html(bible: Bible, citation, lang: str = "es") -> str:
     for ch, v, text in rows:
         label = f"{ch},{v}" if multi_chapter else str(v)
         parts.append(f'<sup class="v">{label}</sup>&#160;{escape(text)}')
-    return '<p class="passage">' + " ".join(parts) + "</p>" + note
+    return f'<p class="{cls}">' + " ".join(parts) + "</p>" + note
 
 
 def _alleluia_html(count: int, lang: str = "es") -> str:
@@ -192,8 +200,20 @@ def build_epub(
     bible: Bible,
     out_path: str,
     lang: str = "es",
+    latin_bible: Bible | None = None,
+    latin_sections: set[str] | None = None,
 ) -> str:
-    """Write the EPUB for *day* to *out_path* and return the path."""
+    """Write the EPUB for *day* to *out_path* and return the path.
+
+    *latin_bible*/*latin_sections* implement the --latin CLI flag: when a
+    section's name is in *latin_sections*, its Latin text is rendered first
+    (Vulgate verses via *latin_bible* for scriptural sections, or
+    Section.latin_text for Oratio/Secreta/Postcommunio) followed immediately
+    by the translation, under the same heading. Both default to "no Latin
+    anywhere" (existing behaviour) so callers that don't pass them are
+    unaffected.
+    """
+    latin_sections = latin_sections or set()
     s = _STRINGS[lang]
     # Short title for Calibre's library/OPDS view — the in-book title page
     # below still shows the full Latin day name for readers.
@@ -224,12 +244,18 @@ def build_epub(
         x = _XHTML_HEAD.format(title=escape(page_title))
         x += f"<h2>{escape(disp)}</h2>\n"
         x += _alleluia_html(section.leading_alleluia, lang)
+        want_latin = section.name in latin_sections
         for cit in section.citations:
             x += f"<h3>{escape(cit.display)}</h3>\n"
+            if want_latin and latin_bible is not None:
+                x += _passage_html(latin_bible, cit, lang, extra_class="latin") + "\n"
             x += _passage_html(bible, cit, lang) + "\n"
             x += _alleluia_html(cit.alleluia_after, lang)
-        if not section.citations and section.prayer_text:
-            x += f'<p class="passage">{escape(section.prayer_text)}</p>\n'
+        if not section.citations:
+            if want_latin and section.latin_text:
+                x += f'<p class="passage latin">{escape(section.latin_text)}</p>\n'
+            if section.prayer_text:
+                x += f'<p class="passage">{escape(section.prayer_text)}</p>\n'
         x += "</body>\n</html>\n"
         chapters.append((fname, escape(page_title), x))
 
