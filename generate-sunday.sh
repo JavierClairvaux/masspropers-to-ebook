@@ -16,13 +16,20 @@ cd "$REPO_DIR"
 TARGET_DATE="$(date -d tomorrow +%Y-%m-%d)"
 
 for LANG in es en; do
-    echo "[$(date -Is)] Generating propers for ${TARGET_DATE} (--lang ${LANG})"
+    # English readers get the Latin alongside the translation; Spanish stays
+    # translation-only for now.
+    LATIN_FLAG=""
+    if [ "$LANG" = "en" ]; then
+        LATIN_FLAG="--latin"
+    fi
+
+    echo "[$(date -Is)] Generating propers for ${TARGET_DATE} (--lang ${LANG}${LATIN_FLAG:+ $LATIN_FLAG})"
 
     # Capture the exact path from the CLI's own "Wrote <path>" line rather
     # than guessing by mtime — necessary now that two files get written in
     # the same run, so "most recently created" would be ambiguous/wrong for
     # the first of the two.
-    OUT_LINE="$(python3 -m masspropers.cli "${TARGET_DATE}" --lang "${LANG}" | tee /dev/stderr | grep '^Wrote ')"
+    OUT_LINE="$(python3 -m masspropers.cli "${TARGET_DATE}" --lang "${LANG}" ${LATIN_FLAG} | tee /dev/stderr | grep '^Wrote ')"
     EPUB_PATH="${OUT_LINE#Wrote }"
 
     if [ -z "${EPUB_PATH:-}" ] || [ ! -f "$EPUB_PATH" ]; then
