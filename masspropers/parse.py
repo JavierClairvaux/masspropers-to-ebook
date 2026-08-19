@@ -50,6 +50,17 @@ _REDITALIC_SPLIT_RE = re.compile(r"(<FONT COLOR=\"red\"><I>.*?</I></FONT>)", re.
 # rendering, but this parses the Latin page, which always accents it) once
 # after an Alleluia verse and twice after the Gradual verse it follows.
 _ALLELUIA_RE = re.compile(r"allel[uú]ia", re.I)
+# A red-italic label that's just a bare versicle/response letter ('℣.',
+# '℟.', 'S.') — punctuation *within* a single oration (e.g. the Ember-day
+# "℣. Flectamus genua. ℟. Levate." exchange before the prayer text), never
+# the start of a second, separate oration. See parse_propers_prose().
+_RUBRIC_LABEL_RE = re.compile(r"^[℣℟SVR]\.?$")
+# The Collect/Postcommunion (never the Secret) re-print this stock "let us
+# pray" call before *every* oration in the block, including the first —
+# so it doesn't by itself count as the primary oration's real content when
+# deciding whether a later label starts a second, separate oration. Covers
+# only the two languages parse_propers_prose is ever run against.
+_OREMUS_RE = re.compile(r"\b(oremus|let us pray|oremos)\.?", re.I)
 
 # The page-navigation "Top / Next / Prev" links each block starts with —
 # boilerplate UI, not content. Strip before extracting prose or checking
@@ -199,6 +210,18 @@ def parse_propers_prose(body: str) -> dict[str, str]:
     by DivinumOfficium's renderer (Oratio -> 'Colecta' on the Spanish page,
     'Collect' on the English one), so callers must look up by the rendered
     name; see epub.SECTION_ES / epub.SECTION_EN.
+
+    A day with a commemoration (of a lesser feast, an octave, an alternate
+    votive collect, ...) gets a *second* oration appended into the same
+    block, introduced by its own red-italic label (e.g. 'Conmemoración S.
+    Joachim...', 'Pro S. Petro'). DivinumOfficium's non-English translations
+    are frequently incomplete for exactly these secondary orations — even
+    the vernacular-language page then silently falls back to English text
+    for just that part — so rather than risk emitting a stray other-language
+    paragraph, only the day's primary oration is kept; anything after such a
+    label is dropped. This is distinct from the '℣.'/'℟.' versicle markers
+    that punctuate a single oration (e.g. Ember-day "℣. Flectamus genua. ℟.
+    Levate."), which are never a boundary — see _RUBRIC_LABEL_RE.
     """
     prose: dict[str, str] = {}
     blocks = re.split(r"<TR><TD[^>]*>", body)
@@ -208,7 +231,43 @@ def parse_propers_prose(body: str) -> dict[str, str]:
             continue
         name = _clean(tm.group(1))
         rest = _NAV_RE.sub("", _TITLE_RE.sub("", block, count=1))
-        text = re.sub(r"\s+", " ", _clean(rest)).strip()
+        # As in parse_propers_html: some days pack more than one proper part
+        # into a single <TD> with no boundary between them (e.g. Ember days,
+        # where a Collect is immediately followed by the next Lesson) --
+        # truncate at that embedded title so its text can't bleed into this
+        # section's prose. _TITLE_RE also matches the SIZE='+1' drop-cap
+        # opening a prayer's closing doxology ('<FONT SIZE=\'+1\'...>P</...>
+        # or nuestro Señor...'), so only a multi-character match is a real
+        # title -- a drop cap is always a single letter.
+        for next_title in _TITLE_RE.finditer(rest):
+            if len(next_title.group(1).strip()) > 1:
+                rest = rest[: next_title.start()]
+                break
+        pieces = _REDITALIC_SPLIT_RE.split(rest)
+        kept = [pieces[0]]
+        accumulated = _clean(pieces[0])
+        i = 1
+        while i < len(pieces):
+            label = _clean(_REDITALIC_RE.search(pieces[i]).group(1))
+            trailing = pieces[i + 1] if i + 1 < len(pieces) else ""
+            has_real_content = bool(_OREMUS_RE.sub("", accumulated).strip())
+            if not _RUBRIC_LABEL_RE.match(label) and has_real_content:
+                # A real second-oration heading, appearing after the primary
+                # oration's own text -- stop here and drop the rest.
+                break
+            kept.append(pieces[i])
+            kept.append(trailing)
+            accumulated += _clean(trailing)
+            i += 2
+        text = re.sub(r"\s+", " ", _clean("".join(kept))).strip()
+        # A dropped second oration usually left its own "Oremus."/"Let us
+        # pray." call-to-prayer dangling at the very end (it's plain prose,
+        # not a red-italic label, so the loop above already committed it to
+        # `kept` before spotting the label that triggered the break) -- trim
+        # it so the text doesn't trail off mid-thought.
+        matches = list(_OREMUS_RE.finditer(text))
+        if matches and matches[-1].end() == len(text):
+            text = text[: matches[-1].start()].strip()
         if text:
             prose[name] = text
     return prose
